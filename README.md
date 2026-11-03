@@ -58,6 +58,7 @@ advanced-rag-platform/
 |   |   |-- data/                    # Evaluation datasets & test fixtures
 |   |-- tests/                       # Automated test suites
 |   |   |-- test_recursive_chunking.py # Test suite for RecursiveChunker
+|   |   |-- test_section_chunking.py   # Test suite for SectionBasedChunker
 |   |-- requirements.txt             # Backend dependencies
 |   |-- Dockerfile
 |-- frontend/                        # Next.js 14+ UI with Tailwind & shadcn/ui (upcoming)
@@ -86,16 +87,22 @@ advanced-rag-platform/
   - Configured for **500 tokens** chunk size and **50 tokens** overlap.
   - Hierarchical boundary splits: Paragraph (`\n\n`) $\rightarrow$ Sentence (`\n`) $\rightarrow$ Word (` `) $\rightarrow$ Character (`""`) to maintain clean contextual boundaries.
   - Supports single text strings (`split_text`) and multi-page document batches (`split_documents`).
-- [x] **Automated Verification (`tests/test_recursive_chunking.py`)**:
-  - 6 unit tests covering initialization, boundary splitting, overlap validation, multi-document batching, token limit bounds, and edge cases.
-  - **Verdict**: 6/6 tests passing.
+- [x] **Strategy 2: Section-Based Chunking (`SectionBasedChunker`)**:
+  - Implements LangChain's `MarkdownHeaderTextSplitter` targeting H1 (`#`), H2 (`##`), and H3 (`###`) hierarchies.
+  - Automatic plain-text header normalization for structured reports (e.g. `1.0 Introduction`, `SECTION 2:`, `APPENDIX A`).
+  - Automatically extracts and attaches `section` header metadata to every chunk for downstream metadata filtering.
+  - Safe overflow protection: Sub-splits sections exceeding `max_section_tokens` (800 tokens) while preserving section tags across all parts.
+- [x] **Automated Verification**:
+  - `tests/test_recursive_chunking.py`: 6 unit tests covering initialization, boundary splitting, overlap validation, multi-document batching, and token limit bounds.
+  - `tests/test_section_chunking.py`: 6 unit tests covering Markdown headers, plain text normalization, section metadata extraction, large section sub-splitting, and multi-document batches.
+  - **Verdict**: 12/12 tests passing.
 - [x] **Gravitas Reliability Runtime Integration**: Enforcing ground-before-mutating, scoped changes, and evidence-backed verification.
 
 ---
 
 ## 🧪 Running the Tests
 
-To verify the current chunking implementation:
+To verify the chunking implementations:
 
 ```bash
 # 1. Activate backend environment
@@ -104,27 +111,33 @@ cd backend
 .\venv\Scripts\Activate.ps1
 
 # 2. Run pytest suite
-$env:PYTHONPATH = "app;."
-pytest tests/test_recursive_chunking.py -v
+$env:PYTHONPATH = "backend"
+pytest backend/tests/ -v
 ```
 
 Expected output:
 ```text
-tests/test_recursive_chunking.py::test_recursive_chunker_initialization PASSED
-tests/test_recursive_chunking.py::test_recursive_chunker_basic_split PASSED
-tests/test_recursive_chunking.py::test_recursive_chunker_overlap PASSED
-tests/test_recursive_chunking.py::test_recursive_chunker_empty_and_whitespace PASSED
-tests/test_recursive_chunking.py::test_recursive_chunker_realistic_500_tokens PASSED
-tests/test_recursive_chunking.py::test_recursive_chunker_documents_batch PASSED
-============================== 6 passed ==============================
+backend/tests/test_recursive_chunking.py::test_recursive_chunker_initialization PASSED
+backend/tests/test_recursive_chunking.py::test_recursive_chunker_basic_split PASSED
+backend/tests/test_recursive_chunking.py::test_recursive_chunker_overlap PASSED
+backend/tests/test_recursive_chunking.py::test_recursive_chunker_empty_and_whitespace PASSED
+backend/tests/test_recursive_chunking.py::test_recursive_chunker_realistic_500_tokens PASSED
+backend/tests/test_recursive_chunking.py::test_recursive_chunker_documents_batch PASSED
+backend/tests/test_section_chunking.py::test_section_chunker_initialization PASSED
+backend/tests/test_section_chunking.py::test_section_chunker_markdown_headers PASSED
+backend/tests/test_section_chunking.py::test_section_chunker_plain_text_normalization PASSED
+backend/tests/test_section_chunking.py::test_section_chunker_large_section_subsplit PASSED
+backend/tests/test_section_chunking.py::test_section_chunker_empty_and_whitespace PASSED
+backend/tests/test_section_chunking.py::test_section_chunker_documents_batch PASSED
+============================== 12 passed ==============================
 ```
 
 ---
 
 ## 🗺️ Next Steps
 
-1. **Chunking Strategy 2**: Semantic Chunking (similarity threshold-based splitting).
-2. **Chunking Strategy 3**: Parent-Child Chunking (200-token retrieval child chunks linked to 1000-token parent context chunks).
-3. **Chunking Strategy 4**: Section-Based Chunking (header-aware document splitting).
-4. **Document Ingestion Pipeline**: LangChain loaders for PDF, TXT, DOCX, and Markdown with metadata enrichment.
-5. **ChromaDB & BM25 Storage**: Storing all simultaneous chunking strategies with query-time filtering.
+1. **Chunking Strategy 3**: Parent-Child Chunking (200-token retrieval child chunks linked to 1000-token parent context chunks).
+2. **Chunking Strategy 4**: Semantic Chunking (similarity threshold-based splitting).
+3. **Document Ingestion Pipeline**: LangChain loaders for PDF, TXT, DOCX, and Markdown with metadata enrichment.
+4. **ChromaDB & BM25 Storage**: Storing all simultaneous chunking strategies with query-time filtering.
+
