@@ -1,67 +1,31 @@
-# Virtual environments
+# Virtual environment
 backend/venv/
-venv/
-env/
-.venv/
-ENV/
 
-# Python cache & artifacts
+# Python cache
 __pycache__/
-*.py[cod]
-*$py.class
-*.so
-.Python
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
+*.pyc
 
-# Pytest / Testing
+# Testing
 .pytest_cache/
-.coverage
-htmlcov/
-.tox/
-.nox/
 
-# Database & Vector Store data
+# Databases & Vector Store
 *.db
 *.sqlite
 *.sqlite3
 backend/data/chroma_db/
-chroma_db/
 
 # Environment variables
 .env
-.env.local
-.env.*.local
 
-# Node / Frontend (for upcoming Next.js app)
-node_modules/
-.next/
-out/
+# Frontend (Next.js)
+frontend/node_modules/
+frontend/.next/
+frontend/out/
 
-# Agent runtime & skills
+# Agent runtime
 .agents/
-.agent/
-_agents/
-_agent/
 
-# IDE & OS
-.idea/
+# OS & Editor
 .vscode/
-*.swp
-*.swo
 .DS_Store
 Thumbs.db
-
