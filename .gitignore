@@ -51,6 +51,12 @@ node_modules/
 .next/
 out/
 
+# Agent runtime & skills
+.agents/
+.agent/
+_agents/
+_agent/
+
 # IDE & OS
 .idea/
 .vscode/

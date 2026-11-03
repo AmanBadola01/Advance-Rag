@@ -64,7 +64,6 @@ advanced-rag-platform/
 |-- frontend/                        # Next.js 14+ UI with Tailwind & shadcn/ui (upcoming)
 |-- sample_documents/                # Test documents (PDF, TXT, DOCX, MD)
 |-- eval_dataset/                    # 20+ Q&A evaluation benchmark pairs
-|-- .agents/skills/gravitas/         # Gravitas engineering reliability runtime
 |-- .env.example                     # Environment template
 |-- .gitignore                       # Git ignore configuration
 |-- README.md                        # Documentation

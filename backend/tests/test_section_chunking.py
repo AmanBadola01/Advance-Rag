@@ -99,3 +99,4 @@ def test_section_chunker_documents_batch():
     assert chunks[0].metadata.page == 1
     assert chunks[1].metadata.section == "Compliance Findings"
     assert chunks[1].metadata.page == 2
+
