@@ -51,14 +51,20 @@ advanced-rag-platform/
 |   |   |-- config.py                # Environment & settings configuration
 |   |   |-- routers/                 # API route handlers
 |   |   |-- services/                # Core RAG engine & algorithms
-|   |   |   |-- chunking_strategies.py # Chunking algorithms (Recursive, etc.)
+|   |   |   |-- chunking/            # Modular chunking strategies
+|   |   |   |   |-- base.py          # BaseChunker & shared token counter
+|   |   |   |   |-- recursive.py     # Recursive character splitting
+|   |   |   |   |-- section.py       # Section-based header splitting
+|   |   |   |   |-- parent_child.py  # Parent-Child hierarchical splitting
+|   |   |   |   |-- __init__.py      # Package export
 |   |   |-- models/                  # Data models
-|   |   |   |-- schemas.py           # Pydantic data contracts (ChunkMetadata, ProcessedChunk)
+|   |   |   |-- schemas.py           # Pydantic data contracts (ChunkMetadata, ProcessedChunk, ParentChildResult)
 |   |   |   |-- database.py          # SQLAlchemy models (SQLite)
 |   |   |-- data/                    # Evaluation datasets & test fixtures
 |   |-- tests/                       # Automated test suites
-|   |   |-- test_recursive_chunking.py # Test suite for RecursiveChunker
-|   |   |-- test_section_chunking.py   # Test suite for SectionBasedChunker
+|   |   |-- test_recursive_chunking.py    # Test suite for RecursiveChunker
+|   |   |-- test_section_chunking.py      # Test suite for SectionBasedChunker
+|   |   |-- test_parent_child_chunking.py # Test suite for ParentChildChunker
 |   |-- requirements.txt             # Backend dependencies
 |   |-- Dockerfile
 |-- frontend/                        # Next.js 14+ UI with Tailwind & shadcn/ui (upcoming)
@@ -91,10 +97,17 @@ advanced-rag-platform/
   - Automatic plain-text header normalization for structured reports (e.g. `1.0 Introduction`, `SECTION 2:`, `APPENDIX A`).
   - Automatically extracts and attaches `section` header metadata to every chunk for downstream metadata filtering.
   - Safe overflow protection: Sub-splits sections exceeding `max_section_tokens` (800 tokens) while preserving section tags across all parts.
+- [x] **Strategy 3: Parent-Child Chunking (`ParentChildChunker`)**:
+  - Implements two-tier hierarchical chunking:
+    - **Child Chunks (~200 tokens)**: Small, dense chunks optimized for vector similarity search.
+    - **Parent Chunks (~1000 tokens)**: Large chunks providing complete context window to the LLM during generation.
+  - Bidirectional metadata linkage: Child chunks carry `parent_id` matching their parent's primary key (`is_parent=False`), while parent chunks are tagged with `is_parent=True`.
+  - Includes `resolve_parent(child_chunk, parent_store)` resolver to automatically retrieve parent context when a child is matched.
 - [x] **Automated Verification**:
   - `tests/test_recursive_chunking.py`: 6 unit tests covering initialization, boundary splitting, overlap validation, multi-document batching, and token limit bounds.
   - `tests/test_section_chunking.py`: 6 unit tests covering Markdown headers, plain text normalization, section metadata extraction, large section sub-splitting, and multi-document batches.
-  - **Verdict**: 12/12 tests passing.
+  - `tests/test_parent_child_chunking.py`: 5 unit tests covering parent-child token bounds, ID linkage integrity, parent resolution lookup, empty text handling, and multi-page batching.
+  - **Verdict**: 17/17 tests passing.
 - [x] **Gravitas Reliability Runtime Integration**: Enforcing ground-before-mutating, scoped changes, and evidence-backed verification.
 
 ---

@@ -1,5 +1,5 @@
 import pytest
-from app.services.chunking_strategies import RecursiveChunker
+from app.services.chunking.recursive import RecursiveChunker
 
 
 def test_recursive_chunker_initialization():

@@ -1,4 +1,16 @@
-from .schemas import ProcessedChunk, ChunkMetadata
+from .schemas import (
+    ProcessedChunk,
+    ChunkMetadata,
+    ParentChildResult,
+    RetrievedChunk,
+    RetrievalFilter,
+)
 
-__all__ = ["ProcessedChunk", "ChunkMetadata"]
+__all__ = [
+    "ProcessedChunk",
+    "ChunkMetadata",
+    "ParentChildResult",
+    "RetrievedChunk",
+    "RetrievalFilter",
+]
 

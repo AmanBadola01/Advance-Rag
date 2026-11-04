@@ -1,5 +1,5 @@
 import pytest
-from app.services.chunking_strategies import SectionBasedChunker
+from app.services.chunking.section import SectionBasedChunker
 
 
 def test_section_chunker_initialization():

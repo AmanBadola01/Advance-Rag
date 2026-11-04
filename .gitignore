@@ -25,6 +25,10 @@ frontend/out/
 # Agent runtime
 .agents/
 
+# Demo / scratch scripts
+demo_chunking.py
+backend/demo_chunking.py
+
 # OS & Editor
 .vscode/
 .DS_Store
