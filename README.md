@@ -70,14 +70,6 @@ advanced-rag-platform/
 |   |   |   |-- rag_chain.py              # LangChain LCEL RAG prompt & generation chain
 |   |   |-- models/                       # Data models & schemas
 |   |   |   |-- schemas.py                # Pydantic data contracts (RetrievedChunk, ProcessedChunk, etc.)
-|   |-- tests/                            # Automated test suites (43 passing tests)
-|   |   |-- test_recursive_chunking.py    # RecursiveChunker unit tests (6 tests)
-|   |   |-- test_section_chunking.py      # SectionBasedChunker unit tests (6 tests)
-|   |   |-- test_parent_child_chunking.py # ParentChildChunker unit tests (5 tests)
-|   |   |-- test_vector_retriever.py      # BasicVectorRetriever unit tests (6 tests)
-|   |   |-- test_hybrid_retriever.py      # BM25 + Hybrid RRF unit tests (7 tests)
-|   |   |-- test_reranker.py              # Cross-Encoder re-ranker unit tests (6 tests)
-|   |   |-- test_parent_child_retriever.py# ParentChildRetriever unit tests (7 tests)
 |   |-- requirements.txt                  # Backend dependencies
 |-- frontend/                             # Next.js 14+ UI with Tailwind & shadcn/ui
 |-- .gitignore                            # Git ignore configuration
