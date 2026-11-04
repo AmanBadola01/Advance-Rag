@@ -2,7 +2,7 @@
 
 An enterprise-ready Retrieval-Augmented Generation (RAG) platform built with **FastAPI**, **LangChain (LCEL)**, **ChromaDB**, and **Next.js**.
 
-This project implements advanced RAG methodologies including **Hybrid Search (Dense + BM25 with Reciprocal Rank Fusion)**, **Cross-Encoder Re-Ranking**, **Multi-Strategy Ingestion (Recursive, Semantic, Parent-Child, Section-Based)**, **Query Transformations (HyDE, Multi-Query, Decomposition)**, and **Quantitative RAG Evaluation (Faithfulness, Answer Relevancy, Context Precision, Context Recall)**.
+This project implements advanced RAG methodologies including **Hybrid Search (Dense + BM25 with Reciprocal Rank Fusion)**, **Cross-Encoder Re-Ranking**, **Multi-Strategy Ingestion (Recursive, Section-Based, Parent-Child)**, **Context Expansion**, and **Quantitative RAG Evaluation**.
 
 ---
 
@@ -25,7 +25,7 @@ This project implements advanced RAG methodologies including **Hybrid Search (De
                             │
                             ▼
              [ Cross-Encoder Re-Ranker ]
-          (ms-marco-MiniLM-L-6-v2 / Cohere)
+          (ms-marco-MiniLM-L-6-v2 / Offline)
                             │
                             ▼
              [ Top-5 High-Precision Chunks ]
@@ -47,109 +47,108 @@ This project implements advanced RAG methodologies including **Hybrid Search (De
 advanced-rag-platform/
 |-- backend/
 |   |-- app/
-|   |   |-- main.py                  # FastAPI application entry point
-|   |   |-- config.py                # Environment & settings configuration
-|   |   |-- routers/                 # API route handlers
-|   |   |-- services/                # Core RAG engine & algorithms
-|   |   |   |-- chunking/            # Modular chunking strategies
-|   |   |   |   |-- base.py          # BaseChunker & shared token counter
-|   |   |   |   |-- recursive.py     # Recursive character splitting
-|   |   |   |   |-- section.py       # Section-based header splitting
-|   |   |   |   |-- parent_child.py  # Parent-Child hierarchical splitting
-|   |   |   |   |-- __init__.py      # Package export
-|   |   |-- models/                  # Data models
-|   |   |   |-- schemas.py           # Pydantic data contracts (ChunkMetadata, ProcessedChunk, ParentChildResult)
-|   |   |   |-- database.py          # SQLAlchemy models (SQLite)
-|   |   |-- data/                    # Evaluation datasets & test fixtures
-|   |-- tests/                       # Automated test suites
-|   |   |-- test_recursive_chunking.py    # Test suite for RecursiveChunker
-|   |   |-- test_section_chunking.py      # Test suite for SectionBasedChunker
-|   |   |-- test_parent_child_chunking.py # Test suite for ParentChildChunker
-|   |-- requirements.txt             # Backend dependencies
-|   |-- Dockerfile
-|-- frontend/                        # Next.js 14+ UI with Tailwind & shadcn/ui (upcoming)
-|-- sample_documents/                # Test documents (PDF, TXT, DOCX, MD)
-|-- eval_dataset/                    # 20+ Q&A evaluation benchmark pairs
-|-- .env.example                     # Environment template
-|-- .gitignore                       # Git ignore configuration
-|-- README.md                        # Documentation
+|   |   |-- main.py                       # FastAPI application entry point
+|   |   |-- config.py                     # Environment & settings configuration
+|   |   |-- api/                          # API route handlers (documents, query, chunks)
+|   |   |-- services/                     # Core RAG engine & algorithms
+|   |   |   |-- chunking/                 # Modular chunking strategies
+|   |   |   |   |-- base.py               # BaseChunker & shared tiktoken counter
+|   |   |   |   |-- recursive.py          # Recursive character splitting (500 tokens, 50 overlap)
+|   |   |   |   |-- section.py            # Section-based header splitting (Markdown & Plain Text)
+|   |   |   |   |-- parent_child.py       # Parent-Child hierarchical splitting (1000/200 tokens)
+|   |   |   |   |-- __init__.py           # Package export
+|   |   |   |-- retrieval/                # Modular retrieval strategies
+|   |   |   |   |-- base.py               # ChromaDB embedding wrapper & boolean filter builder
+|   |   |   |   |-- basic_vector.py       # Dense semantic vector search (ChromaDB + all-MiniLM-L6-v2)
+|   |   |   |   |-- bm25.py               # Sparse keyword search (Lucene-smoothed Okapi BM25)
+|   |   |   |   |-- hybrid.py             # Hybrid search (Dense + BM25 via RRF k=60)
+|   |   |   |   |-- reranker.py           # Two-stage cross-encoder re-ranking (ms-marco-MiniLM-L-6-v2)
+|   |   |   |   |-- parent_child.py       # Context expansion retriever ("Search small, read big")
+|   |   |   |   |-- __init__.py           # Package export
+|   |   |   |-- ingestion.py              # Multi-format document parser (PDF, DOCX, TXT, MD)
+|   |   |   |-- pipeline_tracer.py        # Latency (ms), token usage & execution tracing
+|   |   |   |-- rag_chain.py              # LangChain LCEL RAG prompt & generation chain
+|   |   |-- models/                       # Data models & schemas
+|   |   |   |-- schemas.py                # Pydantic data contracts (RetrievedChunk, ProcessedChunk, etc.)
+|   |-- tests/                            # Automated test suites (43 passing tests)
+|   |   |-- test_recursive_chunking.py    # RecursiveChunker unit tests (6 tests)
+|   |   |-- test_section_chunking.py      # SectionBasedChunker unit tests (6 tests)
+|   |   |-- test_parent_child_chunking.py # ParentChildChunker unit tests (5 tests)
+|   |   |-- test_vector_retriever.py      # BasicVectorRetriever unit tests (6 tests)
+|   |   |-- test_hybrid_retriever.py      # BM25 + Hybrid RRF unit tests (7 tests)
+|   |   |-- test_reranker.py              # Cross-Encoder re-ranker unit tests (6 tests)
+|   |   |-- test_parent_child_retriever.py# ParentChildRetriever unit tests (7 tests)
+|   |-- requirements.txt                  # Backend dependencies
+|-- frontend/                             # Next.js 14+ UI with Tailwind & shadcn/ui
+|-- .gitignore                            # Git ignore configuration
+|-- README.md                             # Project documentation
 ```
 
 ---
 
-## 🚀 Progress & Implemented Features
+## 🚀 Implemented Features & Technical Architecture
 
-### Phase 1: Ingestion & Chunking Engine (In Progress)
+### 1. Chunking Strategies (`app/services/chunking/`)
 
-- [x] **Project Scaffolding & Virtual Environment**: Python 3.12 environment initialized with LangChain LCEL modular packages.
-- [x] **Data Contracts & Pydantic Schemas (`app/models/schemas.py`)**:
-  - `ChunkMetadata`: Standardized schema for all chunk metadata (`chunk_id`, `chunk_index`, `strategy`, `source`, `page`, `file_type`, `token_count`, `char_count`, `section`, `parent_id`, `is_parent`, `custom_metadata`).
-  - `ProcessedChunk`: Strict validation container for chunk content and metadata.
-- [x] **Base Strategy Pattern (`app/services/chunking_strategies.py`)**:
-  - `BaseChunker`: Centralized token counting using `tiktoken` (`cl100k_base` encoding) with fallback approximation, plus uniform chunk construction.
-- [x] **Strategy 1: Recursive Character Splitting (`RecursiveChunker`)**:
-  - Implements LangChain's `RecursiveCharacterTextSplitter`.
-  - Configured for **500 tokens** chunk size and **50 tokens** overlap.
-  - Hierarchical boundary splits: Paragraph (`\n\n`) $\rightarrow$ Sentence (`\n`) $\rightarrow$ Word (` `) $\rightarrow$ Character (`""`) to maintain clean contextual boundaries.
-  - Supports single text strings (`split_text`) and multi-page document batches (`split_documents`).
-- [x] **Strategy 2: Section-Based Chunking (`SectionBasedChunker`)**:
-  - Implements LangChain's `MarkdownHeaderTextSplitter` targeting H1 (`#`), H2 (`##`), and H3 (`###`) hierarchies.
-  - Automatic plain-text header normalization for structured reports (e.g. `1.0 Introduction`, `SECTION 2:`, `APPENDIX A`).
-  - Automatically extracts and attaches `section` header metadata to every chunk for downstream metadata filtering.
-  - Safe overflow protection: Sub-splits sections exceeding `max_section_tokens` (800 tokens) while preserving section tags across all parts.
-- [x] **Strategy 3: Parent-Child Chunking (`ParentChildChunker`)**:
-  - Implements two-tier hierarchical chunking:
-    - **Child Chunks (~200 tokens)**: Small, dense chunks optimized for vector similarity search.
-    - **Parent Chunks (~1000 tokens)**: Large chunks providing complete context window to the LLM during generation.
-  - Bidirectional metadata linkage: Child chunks carry `parent_id` matching their parent's primary key (`is_parent=False`), while parent chunks are tagged with `is_parent=True`.
-  - Includes `resolve_parent(child_chunk, parent_store)` resolver to automatically retrieve parent context when a child is matched.
-- [x] **Automated Verification**:
-  - `tests/test_recursive_chunking.py`: 6 unit tests covering initialization, boundary splitting, overlap validation, multi-document batching, and token limit bounds.
-  - `tests/test_section_chunking.py`: 6 unit tests covering Markdown headers, plain text normalization, section metadata extraction, large section sub-splitting, and multi-document batches.
-  - `tests/test_parent_child_chunking.py`: 5 unit tests covering parent-child token bounds, ID linkage integrity, parent resolution lookup, empty text handling, and multi-page batching.
-  - **Verdict**: 17/17 tests passing.
-- [x] **Gravitas Reliability Runtime Integration**: Enforcing ground-before-mutating, scoped changes, and evidence-backed verification.
+- [x] **Base Strategy Pattern (`base.py`)**: Centralized token counting using `tiktoken` (`cl100k_base` encoding) with fallback character approximation.
+- [x] **Recursive Character Splitting (`recursive.py`)**: 500-token chunks with 50-token overlap across hierarchical boundaries (`\n\n` $\rightarrow$ `\n` $\rightarrow$ ` ` $\rightarrow$ `""`).
+- [x] **Section-Based Chunking (`section.py`)**: Preserves Markdown headers (H1/H2/H3) and plain-text sections (`1.0 Introduction`, `SECTION:`) with automatic sub-splitting for oversized sections.
+- [x] **Parent-Child Chunking (`parent_child.py`)**: Generates 1000-token parent context chunks and 200-token child search chunks linked via `parent_id`.
+
+### 2. Retrieval Engines (`app/services/retrieval/`)
+
+- [x] **Basic Vector Retriever (`basic_vector.py`)**:
+  - Dense semantic search using ChromaDB and `sentence-transformers/all-MiniLM-L6-v2` (384 dimensions, runs 100% offline).
+  - Cosine similarity scoring normalized to a clean `0.0` to `1.0` scale.
+  - Native LangChain LCEL adapter (`as_langchain_retriever`).
+- [x] **BM25 Lexical Retriever (`bm25.py`)**:
+  - Inverted keyword index using `rank_bm25`.
+  - Custom `LuceneBM25` implementation with $1+$ smoothing to eliminate negative or zero IDF on small document sets.
+  - Handles exact keyword matches, serial numbers, error codes (e.g. `E-4021`), and acronyms.
+- [x] **Hybrid Retriever with Reciprocal Rank Fusion (`hybrid.py`)**:
+  - Combines ChromaDB dense vectors and BM25 sparse lexical scores.
+  - Merges rankings using weighted **Reciprocal Rank Fusion (RRF $k=60$)**:
+    $$\text{RRF\_Score}(d) = w_{\text{dense}} \times \frac{1}{k + \text{rank}_{\text{dense}}} + w_{\text{bm25}} \times \frac{1}{k + \text{rank}_{\text{bm25}}}$$
+  - Full score transparency for the frontend Chunk Inspector (`dense_rank`, `bm25_rank`, `dense_score`, `bm25_score`, `rrf_score`).
+- [x] **Cross-Encoder Re-Ranker (`reranker.py`)**:
+  - Two-stage retrieval: pulls top-20 broad candidates from Hybrid search and uses `cross-encoder/ms-marco-MiniLM-L-6-v2` to score `(query, passage)` pairs simultaneously with cross-attention.
+  - Distinguishes true answers from keyword-stuffed distractors.
+  - Calibrated sigmoid score normalization ($0.0$ to $1.0$) and tracks `pre_rerank_rank`.
+- [x] **Parent-Child Context Expansion Retriever (`parent_child.py`)**:
+  - "Search small, read big": searches 200-token child chunks for sharp vector similarity, resolves matching `parent_id`, and sends the full 1000-token parent chunk to the LLM.
+  - Automatic deduplication so multiple matching child chunks belonging to the same parent only return that parent once.
 
 ---
 
-## 🧪 Running the Tests
+## 🧪 Automated Test Suite (43 Tests)
 
-To verify the chunking implementations:
+All modules are backed by comprehensive unit tests covering edge cases, empty strings, overlap boundaries, metadata filtering, and LCEL integration:
 
 ```bash
-# 1. Activate backend environment
-cd backend
-# On Windows:
-.\venv\Scripts\Activate.ps1
-
-# 2. Run pytest suite
+# Set PYTHONPATH and run all tests
 $env:PYTHONPATH = "backend"
 pytest backend/tests/ -v
 ```
 
-Expected output:
+### Test Summary:
 ```text
-backend/tests/test_recursive_chunking.py::test_recursive_chunker_initialization PASSED
-backend/tests/test_recursive_chunking.py::test_recursive_chunker_basic_split PASSED
-backend/tests/test_recursive_chunking.py::test_recursive_chunker_overlap PASSED
-backend/tests/test_recursive_chunking.py::test_recursive_chunker_empty_and_whitespace PASSED
-backend/tests/test_recursive_chunking.py::test_recursive_chunker_realistic_500_tokens PASSED
-backend/tests/test_recursive_chunking.py::test_recursive_chunker_documents_batch PASSED
-backend/tests/test_section_chunking.py::test_section_chunker_initialization PASSED
-backend/tests/test_section_chunking.py::test_section_chunker_markdown_headers PASSED
-backend/tests/test_section_chunking.py::test_section_chunker_plain_text_normalization PASSED
-backend/tests/test_section_chunking.py::test_section_chunker_large_section_subsplit PASSED
-backend/tests/test_section_chunking.py::test_section_chunker_empty_and_whitespace PASSED
-backend/tests/test_section_chunking.py::test_section_chunker_documents_batch PASSED
-============================== 12 passed ==============================
+backend/tests/test_hybrid_retriever.py        7 PASSED
+backend/tests/test_parent_child_chunking.py   5 PASSED
+backend/tests/test_parent_child_retriever.py  7 PASSED
+backend/tests/test_recursive_chunking.py      6 PASSED
+backend/tests/test_reranker.py                6 PASSED
+backend/tests/test_section_chunking.py        6 PASSED
+backend/tests/test_vector_retriever.py        6 PASSED
+============================= 43 passed in 31.59s =============================
 ```
 
 ---
 
-## 🗺️ Next Steps
+## 🗺️ Next Milestones
 
-1. **Chunking Strategy 3**: Parent-Child Chunking (200-token retrieval child chunks linked to 1000-token parent context chunks).
-2. **Chunking Strategy 4**: Semantic Chunking (similarity threshold-based splitting).
-3. **Document Ingestion Pipeline**: LangChain loaders for PDF, TXT, DOCX, and Markdown with metadata enrichment.
-4. **ChromaDB & BM25 Storage**: Storing all simultaneous chunking strategies with query-time filtering.
-
+1. **Document Ingestion Engine** (`ingestion.py`): Multi-format parser for PDF (`pypdf`), Word (`python-docx`), TXT, and Markdown.
+2. **Pipeline Tracer & RAG Chain** (`pipeline_tracer.py`, `rag_chain.py`): Step latency measurement and LCEL response generation.
+3. **FastAPI Endpoints** (`app/api/`): `/documents/upload`, `/query`, and `/chunks`.
+4. **Query Transformations**: Multi-Query generation & HyDE (Hypothetical Document Embeddings).
+5. **Next.js Frontend**: Interactive chat, Chunk Inspector, Retrieval Strategy Dropdown, and Pipeline Visualizer.
+6. **Quantitative Evaluation Pipeline**: Faithfulness, Answer Relevancy, Context Precision, and Context Recall.
