@@ -24,6 +24,7 @@ frontend/out/
 
 # Agent runtime
 .agents/
+.hallmark
 
 # Demo / scratch scripts
 demo_chunking.py
