@@ -184,7 +184,8 @@ class SectionBasedChunker(BaseChunker):
             for c in doc_chunks:
                 # Re-index chunks to ensure strict sequential ordering
                 c.metadata.chunk_index = chunk_counter
-                c.metadata.chunk_id = f"{doc_id}_section_{chunk_counter}"
+                c.chunk_id = f"{doc_id}_section_{chunk_counter}"
+                c.metadata.chunk_id = c.chunk_id
                 all_chunks.append(c)
                 chunk_counter += 1
 

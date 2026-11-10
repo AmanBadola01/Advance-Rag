@@ -116,6 +116,8 @@ class ParentChildRetriever:
                 if child.chunk_id not in seen_parent_ids:
                     seen_parent_ids.add(child.chunk_id)
                     resolved_parents.append(child)
+                if len(resolved_parents) >= top_k:
+                    break
                 continue
 
             # Deduplication: If this parent was already retrieved by an earlier, higher-scoring child, skip it

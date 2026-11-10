@@ -8,7 +8,7 @@ import io
 import os
 import re
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Dict, Any, Optional, Union
 
 import pypdf
@@ -93,15 +93,24 @@ def extract_document_pages(filename: str, file_bytes: bytes) -> List[Dict[str, A
 
     file_type = detect_file_type(filename)
 
-    if file_type == "pdf":
-        return extract_text_from_pdf(file_bytes)
-    elif file_type in ("docx", "doc"):
-        return extract_text_from_docx(file_bytes)
-    elif file_type in ("txt", "md", "markdown", "csv", "json"):
+    if file_type not in {"pdf", "docx", "txt", "md", "markdown", "csv", "json"}:
+        raise ValueError(f"Unsupported file type: {file_type or 'unknown'}")
+    try:
+        if file_type == "pdf":
+            return extract_text_from_pdf(file_bytes)
+        if file_type == "docx":
+            return extract_text_from_docx(file_bytes)
         return extract_text_from_txt(file_bytes)
-    else:
-        # Fallback: attempt plain-text decoding for unknown text files
-        return extract_text_from_txt(file_bytes)
+    except Exception as exc:
+        raise ValueError(f"Cannot read {file_type} document: {exc}") from exc
+
+
+def normalize_pages(pages, filename, custom_metadata=None):
+    return [{"text": p["text"], "metadata": {
+        **(custom_metadata or {}), "source": filename,
+        "page": p.get("page", 1), "file_type": detect_file_type(filename),
+    }} for p in pages]
+
 
 
 class DocumentIngestionService:
@@ -143,6 +152,9 @@ class DocumentIngestionService:
         if not file_bytes:
             raise ValueError(f"Uploaded file '{filename}' is empty.")
 
+        if strategy not in {"recursive", "section", "parent_child"}:
+            raise ValueError(f"Unsupported chunking strategy: {strategy}")
+
         # 1. Parse pages and text from file content
         pages = extract_document_pages(filename, file_bytes)
         if not pages:
@@ -150,7 +162,7 @@ class DocumentIngestionService:
 
         doc_id = f"doc_{uuid.uuid4().hex[:8]}"
         file_type = detect_file_type(filename)
-        created_at = datetime.utcnow().isoformat() + "Z"
+        created_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
         metadata = custom_metadata or {}
 
         # 2. Chunk according to user-selected strategy
@@ -158,14 +170,8 @@ class DocumentIngestionService:
         total_tokens = 0
 
         if strategy == "parent_child":
-            # Combine pages into full text for parent-child context hierarchy
-            full_text = "\n\n".join(p["text"] for p in pages)
-            pc_result = self.parent_child_chunker.split_into_parent_child(
-                text=full_text,
-                doc_id=doc_id,
-                source=filename,
-                file_type=file_type,
-                custom_metadata=metadata,
+            pc_result = self.parent_child_chunker.split_documents(
+                normalize_pages(pages, filename, metadata), doc_id=doc_id,
             )
 
             # Store in parent-child retriever if available, otherwise hybrid store
@@ -180,11 +186,8 @@ class DocumentIngestionService:
 
         elif strategy == "section":
             chunks = self.section_chunker.split_documents(
-                documents=pages,
+                documents=normalize_pages(pages, filename, metadata),
                 doc_id=doc_id,
-                source=filename,
-                file_type=file_type,
-                custom_metadata=metadata,
             )
             if self.hybrid_retriever:
                 self.hybrid_retriever.add_chunks(chunks)
@@ -195,11 +198,8 @@ class DocumentIngestionService:
         else:
             # Default: Recursive Character Splitting (500 tokens, 50 overlap)
             chunks = self.recursive_chunker.split_documents(
-                documents=pages,
+                documents=normalize_pages(pages, filename, metadata),
                 doc_id=doc_id,
-                source=filename,
-                file_type=file_type,
-                custom_metadata=metadata,
             )
             if self.hybrid_retriever:
                 self.hybrid_retriever.add_chunks(chunks)

@@ -58,10 +58,11 @@ class BM25Retriever:
         if not new_chunks:
             return 0
 
-        self.chunks.extend(new_chunks)
+        by_id = {c.chunk_id: c for c in self.chunks}
+        by_id.update({c.chunk_id: c for c in new_chunks})
+        self.chunks = list(by_id.values())
         # Tokenize each new chunk for BM25
-        for c in new_chunks:
-            self.tokenized_corpus.append(tokenize_text(c.text))
+        self.tokenized_corpus = [tokenize_text(c.text) for c in self.chunks]
 
         # Re-build the LuceneBM25 index with the full corpus
         self.bm25 = LuceneBM25(self.tokenized_corpus)

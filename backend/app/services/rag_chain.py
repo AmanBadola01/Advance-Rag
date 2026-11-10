@@ -85,11 +85,13 @@ def get_llm_instance(model_name: Optional[str] = None):
     if google_key:
         try:
             from langchain_google_genai import ChatGoogleGenerativeAI
-            selected_model = model_name or os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
+            selected_model = model_name or os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite")
             return ChatGoogleGenerativeAI(
                 model=selected_model,
                 temperature=0.1,
                 google_api_key=google_key,
+                timeout=30,
+                max_retries=0,
             ), selected_model
         except Exception:
             pass
@@ -102,6 +104,8 @@ def get_llm_instance(model_name: Optional[str] = None):
                 model=selected_model,
                 temperature=0.1,
                 api_key=openai_key,
+                timeout=30,
+                max_retries=0,
             ), selected_model
         except Exception:
             pass
@@ -190,91 +194,98 @@ class RAGChainService:
         # 1. Initialize Pipeline Trace
         trace_id = self.tracer.start_trace(query=query, retrieval_strategy=retrieval_strategy)
 
-        # 2. Execute Retrieval Step
-        retriever = self._resolve_retriever(retrieval_strategy)
-        retrieved_chunks: List[RetrievedChunk] = []
+        try:
+            # 2. Execute Retrieval Step
+            retriever = self._resolve_retriever(retrieval_strategy)
+            retrieved_chunks: List[RetrievedChunk] = []
 
-        with self.tracer.step_timer(trace_id, "Candidate Retrieval", {"strategy": retrieval_strategy, "top_k": top_k}) as step_meta:
-            if retriever:
-                # Handle strategy-specific parameter passes
-                if hasattr(retriever, "retrieve"):
+            with self.tracer.step_timer(trace_id, "Candidate Retrieval", {"strategy": retrieval_strategy, "top_k": top_k}) as step_meta:
+                if retriever:
+                    # Handle strategy-specific parameter passes
+                    if hasattr(retriever, "retrieve"):
+                        try:
+                            retrieved_chunks = retriever.retrieve(
+                                query=query,
+                                top_k=top_k,
+                                filters=filters,
+                                semantic_weight=semantic_weight,
+                                bm25_weight=bm25_weight,
+                            )
+                        except TypeError:
+                            # Fallback for retrievers without weight kwargs (vector, bm25, parent_child)
+                            retrieved_chunks = retriever.retrieve(
+                                query=query,
+                                top_k=top_k,
+                                filters=filters,
+                            )
+                    elif hasattr(retriever, "invoke"):
+                        lc_docs = retriever.invoke(query)
+                        retrieved_chunks = [
+                            RetrievedChunk(
+                                chunk_id=doc.metadata.get("chunk_id", f"c_{i}"),
+                                text=doc.page_content,
+                                score=float(doc.metadata.get("score", 1.0)),
+                                rank=i + 1,
+                                strategy=retrieval_strategy,
+                                source=doc.metadata.get("source", "unknown"),
+                                page=doc.metadata.get("page", 1),
+                            )
+                            for i, doc in enumerate(lc_docs)
+                        ]
+
+                step_meta["chunks_retrieved"] = len(retrieved_chunks)
+
+            # 3. Context & Citation Assembly Step
+            with self.tracer.step_timer(trace_id, "Context Assembly") as step_meta:
+                context_text, citations = format_context_with_citations(retrieved_chunks)
+                step_meta["citations_count"] = len(citations)
+                step_meta["context_char_length"] = len(context_text)
+
+            # 4. LLM Generation Step
+            final_answer = ""
+            llm, model_identifier = get_llm_instance(model_name=llm_model)
+            estimated_tokens = len(query.split()) + len(context_text.split())
+
+            with self.tracer.step_timer(trace_id, "LLM Synthesis", {"model": model_identifier}) as step_meta:
+                if llm is not None:
                     try:
-                        retrieved_chunks = retriever.retrieve(
-                            query=query,
-                            top_k=top_k,
-                            filters=filters,
-                            semantic_weight=semantic_weight,
-                            bm25_weight=bm25_weight,
-                        )
-                    except TypeError:
-                        # Fallback for retrievers without weight kwargs (vector, bm25, parent_child)
-                        retrieved_chunks = retriever.retrieve(
-                            query=query,
-                            top_k=top_k,
-                            filters=filters,
-                        )
-                elif hasattr(retriever, "invoke"):
-                    lc_docs = retriever.invoke(query)
-                    retrieved_chunks = [
-                        RetrievedChunk(
-                            chunk_id=doc.metadata.get("chunk_id", f"c_{i}"),
-                            text=doc.page_content,
-                            score=float(doc.metadata.get("score", 1.0)),
-                            rank=i + 1,
-                            strategy=retrieval_strategy,
-                            source=doc.metadata.get("source", "unknown"),
-                            page=doc.metadata.get("page", 1),
-                        )
-                        for i, doc in enumerate(lc_docs)
-                    ]
-
-            step_meta["chunks_retrieved"] = len(retrieved_chunks)
-
-        # 3. Context & Citation Assembly Step
-        with self.tracer.step_timer(trace_id, "Context Assembly") as step_meta:
-            context_text, citations = format_context_with_citations(retrieved_chunks)
-            step_meta["citations_count"] = len(citations)
-            step_meta["context_char_length"] = len(context_text)
-
-        # 4. LLM Generation Step
-        final_answer = ""
-        llm, model_identifier = get_llm_instance(model_name=llm_model)
-        estimated_tokens = len(query.split()) + len(context_text.split())
-
-        with self.tracer.step_timer(trace_id, "LLM Synthesis", {"model": model_identifier}) as step_meta:
-            if llm is not None:
-                try:
-                    # LangChain LCEL prompt chain
-                    prompt = ChatPromptTemplate.from_messages([
-                        ("system", SYSTEM_RAG_PROMPT),
-                        ("user", "{question}"),
-                    ])
-                    chain = prompt | llm | StrOutputParser()
-                    final_answer = chain.invoke({"context": context_text, "question": query})
-                except Exception as e:
-                    # Graceful fallback if external LLM API rate limits or errors
+                        # LangChain LCEL prompt chain
+                        prompt = ChatPromptTemplate.from_messages([
+                            ("system", SYSTEM_RAG_PROMPT),
+                            ("user", "{question}"),
+                        ])
+                        chain = prompt | llm | StrOutputParser()
+                        final_answer = chain.invoke({"context": context_text, "question": query})
+                    except Exception as e:
+                        # Graceful fallback if external LLM API rate limits or errors
+                        final_answer = generate_offline_fallback_answer(query, retrieved_chunks, citations)
+                        step_meta["api_fallback"] = True
+                        step_meta["error"] = str(e)
+                else:
                     final_answer = generate_offline_fallback_answer(query, retrieved_chunks, citations)
-                    step_meta["api_fallback"] = True
-                    step_meta["error"] = str(e)
-            else:
-                final_answer = generate_offline_fallback_answer(query, retrieved_chunks, citations)
 
-            estimated_tokens += len(final_answer.split())
-            step_meta["output_length"] = len(final_answer)
+                estimated_tokens += len(final_answer.split())
+                step_meta["output_length"] = len(final_answer)
 
-        # 5. Finalize Execution Trace
-        completed_trace = self.tracer.end_trace(trace_id=trace_id, total_tokens=estimated_tokens)
+            # 5. Finalize Execution Trace
+            completed_trace = self.tracer.end_trace(trace_id=trace_id, total_tokens=estimated_tokens)
 
-        return RAGResponse(
-            query=query,
-            answer=final_answer,
-            retrieval_strategy=retrieval_strategy,
-            retrieved_chunks=retrieved_chunks,
-            citations=citations,
-            trace_id=trace_id,
-            total_latency_ms=completed_trace.total_latency_ms,
-            model_name=model_identifier,
-        )
+            return RAGResponse(
+                query=query,
+                answer=final_answer,
+                retrieval_strategy=retrieval_strategy,
+                retrieved_chunks=retrieved_chunks,
+                citations=citations,
+                trace_id=trace_id,
+                total_latency_ms=completed_trace.total_latency_ms,
+                model_name=model_identifier,
+            )
+
+        except Exception as exc:
+            if trace_id in self.tracer._active_contexts:
+                self.tracer.end_trace(trace_id, total_tokens=0)
+            exc.trace_id = trace_id
+            raise
 
     # Runs two independent pipeline configurations concurrently on the same query for side-by-side A/B evaluation.
     def execute_ab_comparison(

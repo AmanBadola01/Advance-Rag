@@ -27,23 +27,24 @@ async def upload_document(
         raise HTTPException(status_code=400, detail="Uploaded file is empty.")
 
     try:
-        # 1. Parse pages to store in raw documents store for future A/B on-demand chunking
-        pages = extract_document_pages(file.filename, file_bytes)
+        with container.lock:
+            # 1. Parse pages to store in raw documents store for future A/B on-demand chunking
+            pages = extract_document_pages(file.filename, file_bytes)
 
-        # 2. Ingest, chunk, and index into ChromaDB and BM25
-        summary = container.ingestion_service.ingest_file(
-            filename=file.filename,
-            file_bytes=file_bytes,
-            strategy=strategy,
-        )
+            # 2. Ingest, chunk, and index into ChromaDB and BM25
+            summary = container.ingestion_service.ingest_file(
+                filename=file.filename,
+                file_bytes=file_bytes,
+                strategy=strategy,
+            )
 
-        # 3. Register raw document text for A/B testing re-chunking
-        container.register_raw_document(
-            doc_id=summary.doc_id,
-            filename=file.filename,
-            pages=pages,
-            strategy=strategy,
-        )
+            # 3. Register raw document text for A/B testing re-chunking
+            container.register_raw_document(
+                doc_id=summary.doc_id,
+                filename=file.filename,
+                pages=pages,
+                strategy=strategy,
+            )
 
         return summary
     except ValueError as ve:

@@ -5,6 +5,7 @@ Takes Stage 1 candidates from Hybrid Search and re-scores them for maximum preci
 """
 
 import math
+import os
 from typing import List, Dict, Any, Optional
 from sentence_transformers import CrossEncoder
 
@@ -33,7 +34,7 @@ class CrossEncoderReranker:
     # Lazy-loads the CrossEncoder PyTorch model on first invocation to optimize startup.
     def _get_model(self) -> CrossEncoder:
         if self._model is None:
-            self._model = CrossEncoder(self.model_name, local_files_only=True)
+            self._model = CrossEncoder(self.model_name, local_files_only=os.getenv("RAG_MODEL_LOCAL_ONLY", "false").lower() == "true")
         return self._model
 
     # Scores candidate chunks against the user query using cross-attention and returns sorted top-k results.

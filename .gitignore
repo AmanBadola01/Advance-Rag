@@ -34,3 +34,22 @@ backend/demo_chunking.py
 .vscode/
 .DS_Store
 Thumbs.db
+
+# Local deployment runtime (never commit environment or logs)
+deploy/.pm2/
+deploy/*.log
+
+# Local environments, private storage and generated artifacts
+.venv/
+venv/
+.env.*
+!.env.example
+data/
+backend/data/
+*.log
+*.sqlite-wal
+*.sqlite-shm
+*.db-wal
+*.db-shm
+.coverage
+htmlcov/

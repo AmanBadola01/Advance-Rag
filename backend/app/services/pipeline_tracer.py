@@ -6,7 +6,7 @@ and intermediate chunk counts to power the frontend Execution Pipeline Tracer da
 
 import time
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from contextlib import contextmanager
 from typing import List, Dict, Any, Optional
 
@@ -35,7 +35,7 @@ class PipelineTracer:
             "retrieval_strategy": retrieval_strategy,
             "start_time": time.perf_counter(),
             "steps": [],
-            "created_at": datetime.utcnow().isoformat() + "Z",
+            "created_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         }
         return trace_id
 
@@ -53,7 +53,7 @@ class PipelineTracer:
             duration_ms=round(duration_ms, 2),
             status=status,
             details=details or {},
-            timestamp=datetime.utcnow().isoformat() + "Z",
+            timestamp=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         )
 
         if trace_id in self._active_contexts:
@@ -119,6 +119,10 @@ class PipelineTracer:
         self.completed_traces[trace_id] = trace
         return trace
 
+    def save_answer(self, trace_id, response):
+        if trace_id in self.completed_traces:
+            self.completed_traces[trace_id].saved_answer = response
+
     # Retrieves a completed pipeline trace by its unique trace identifier.
     def get_trace(self, trace_id: str) -> Optional[PipelineTrace]:
         return self.completed_traces.get(trace_id)
@@ -135,5 +139,37 @@ class PipelineTracer:
 
 
 # Global singleton instance of PipelineTracer for application-wide tracing.
-pipeline_tracer = PipelineTracer()
+class AccountTracer:
+    def __init__(self):
+        import threading
+        self._lock = threading.RLock()
+        self._tracers = {}
+    def __getattr__(self, name):
+        from app.core.account_context import account_id
+        from app.auth import ROOT
+        import json
+        uid = account_id.get()
+        if uid is None:
+            raise RuntimeError('Account context required')
+        with self._lock:
+            path = ROOT / uid / 'history.json'
+            if uid not in self._tracers:
+                tracer = PipelineTracer(max_history=1000)
+                if path.exists():
+                    tracer.completed_traces = {t['trace_id']: PipelineTrace.model_validate(t) for t in json.loads(path.read_text())}
+                self._tracers[uid] = tracer
+            tracer = self._tracers[uid]
+        method = getattr(tracer, name)
+        if name not in ('end_trace', 'clear', 'save_answer'):
+            return method
+        def persist(*args, **kwargs):
+            with self._lock:
+                result = method(*args, **kwargs)
+                path.parent.mkdir(parents=True, exist_ok=True)
+                temp = path.with_suffix('.new')
+                temp.write_text(json.dumps([t.model_dump(mode='json') for t in tracer.completed_traces.values()]))
+                temp.replace(path)
+                return result
+        return persist
+pipeline_tracer = AccountTracer()
 

@@ -3,6 +3,7 @@ Base Retrieval Infrastructure
 Provides shared embedding wrapper, filter conversion utilities, and base interface.
 """
 
+import os
 from typing import List, Dict, Any, Optional
 from chromadb import EmbeddingFunction
 from sentence_transformers import SentenceTransformer
@@ -24,7 +25,7 @@ class LocalMiniLMEmbedding(EmbeddingFunction):
     # Lazy-loads the PyTorch model on first invocation to optimize startup time.
     def _get_model(self) -> SentenceTransformer:
         if self._model is None:
-            self._model = SentenceTransformer(self.model_name, local_files_only=True)
+            self._model = SentenceTransformer(self.model_name, local_files_only=os.getenv("RAG_MODEL_LOCAL_ONLY", "false").lower() == "true")
         return self._model
 
     # Encodes input texts into dense embedding float vectors.

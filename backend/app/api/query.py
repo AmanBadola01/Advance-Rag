@@ -4,7 +4,17 @@ Executes RAG retrieval pipelines, handles on-demand custom A/B testing, and serv
 """
 
 from typing import List, Dict, Any, Optional
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, status, Query
+from contextlib import contextmanager
+import uuid
+import chromadb
+from app.services.ingestion import normalize_pages
+from app.services.retrieval.basic_vector import BasicVectorRetriever
+from app.services.retrieval.bm25 import BM25Retriever
+from app.services.retrieval.hybrid import HybridRetriever
+from app.services.retrieval.parent_child import ParentChildRetriever
+from app.services.retrieval.reranker import HybridRerankRetriever
+from app.services.rag_chain import RAGChainService
 
 from app.models.schemas import QueryRequest, RAGResponse, ABTestRequest, PipelineTrace
 from app.core.container import container
@@ -25,62 +35,51 @@ def execute_query(req: QueryRequest):
     try:
         response = container.rag_chain_service.execute(
             query=req.query,
-            retrieval_strategy=req.retrieval_strategy or "hybrid_rerank",
-            top_k=req.top_k or 5,
+            retrieval_strategy=req.retrieval_strategy,
+            top_k=req.top_k,
             filters=req.filters,
             semantic_weight=req.semantic_weight,
             bm25_weight=req.bm25_weight,
             llm_model=req.llm_model,
         )
+        pipeline_tracer.save_answer(response.trace_id, {**response.model_dump(mode="json"), "query_scope": req.filters.source if req.filters else ""})
         return response
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Query execution failed: {str(e)}")
+        raise HTTPException(status_code=500, detail={"message": f"Query execution failed: {str(e)}", "trace_id": getattr(e, "trace_id", None)})
 
 
-# Helper function that performs dynamic on-the-fly chunking on raw document text if custom chunk settings are provided.
-def _prepare_custom_chunks_if_needed(document_id: Optional[str], config: Any) -> Optional[str]:
-    if not document_id:
-        return None
-
+@contextmanager
+def custom_pipeline(document_id, config):
+    if document_id is None:
+        yield container.rag_chain_service
+        return
     raw_doc = container.get_raw_document(document_id)
-    if not raw_doc:
-        return None
-
-    pages = raw_doc.get("pages", [])
-    if not pages:
-        return None
-
-    strategy = (config.chunking_strategy or "recursive").lower()
-    custom_strategy_tag = f"custom_{strategy}_{config.chunk_size or 500}"
-
-    # Check if custom chunker is needed
-    if strategy == "section":
-        chunker = SectionBasedChunker(max_section_tokens=config.chunk_size or 800)
-        chunks = chunker.split_documents(pages, doc_id=document_id, source=raw_doc["filename"])
-        for c in chunks:
-            c.metadata.strategy = custom_strategy_tag
-        container.hybrid_retriever.add_chunks(chunks)
-    elif strategy == "parent_child":
-        full_text = "\n\n".join(p["text"] for p in pages)
-        pc_chunker = ParentChildChunker(
-            parent_chunk_size=config.parent_chunk_size or 1000,
-            child_chunk_size=config.child_chunk_size or 200,
+    if raw_doc is None:
+        raise HTTPException(status_code=404, detail="Document not found.")
+    # Each variant gets a disposable, private collection and independent lexical/parent stores.
+    client = chromadb.EphemeralClient()
+    name = "ab_" + uuid.uuid4().hex
+    vector = BasicVectorRetriever(client=client, collection_name=name, embedding_function=container.embedding_fn)
+    hybrid = HybridRetriever(vector, BM25Retriever())
+    parents = ParentChildRetriever(hybrid)
+    try:
+        pages = normalize_pages(raw_doc["pages"], raw_doc["filename"])
+        if config.chunking_strategy == "parent_child":
+            chunker = ParentChildChunker(parent_chunk_size=config.parent_chunk_size, child_chunk_size=config.child_chunk_size)
+            parents.add_parent_child_result(chunker.split_documents(pages, doc_id=name))
+        else:
+            chunker = (SectionBasedChunker(max_section_tokens=config.chunk_size)
+                       if config.chunking_strategy == "section" else
+                       RecursiveChunker(chunk_size=config.chunk_size, chunk_overlap=config.chunk_overlap))
+            hybrid.add_chunks(chunker.split_documents(pages, doc_id=name))
+        yield RAGChainService(
+            vector_retriever=vector, bm25_retriever=hybrid.bm25_retriever,
+            hybrid_retriever=hybrid,
+            hybrid_rerank_retriever=HybridRerankRetriever(hybrid, container.cross_encoder),
+            parent_child_retriever=parents, tracer=pipeline_tracer,
         )
-        pc_result = pc_chunker.split_into_parent_child(full_text, doc_id=document_id, source=raw_doc["filename"])
-        for c in pc_result.children:
-            c.metadata.strategy = custom_strategy_tag
-        container.parent_child_retriever.add_parent_child_result(pc_result)
-    else:
-        rec_chunker = RecursiveChunker(
-            chunk_size=config.chunk_size or 500,
-            chunk_overlap=config.chunk_overlap or 50,
-        )
-        chunks = rec_chunker.split_documents(pages, doc_id=document_id, source=raw_doc["filename"])
-        for c in chunks:
-            c.metadata.strategy = custom_strategy_tag
-        container.hybrid_retriever.add_chunks(chunks)
-
-    return custom_strategy_tag
+    finally:
+        client.delete_collection(name)
 
 
 # Executes an A/B comparison across two custom pipelines with side-by-side answers, latencies, and metrics.
@@ -90,33 +89,17 @@ def execute_ab_test(req: ABTestRequest):
         raise HTTPException(status_code=400, detail="Query string cannot be empty.")
 
     try:
-        # Dynamically prepare custom chunking if specific document ID provided
-        tag_a = _prepare_custom_chunks_if_needed(req.document_id, req.pipeline_a)
-        tag_b = _prepare_custom_chunks_if_needed(req.document_id, req.pipeline_b)
-
-        from app.models.schemas import RetrievalFilter
-        filter_a = RetrievalFilter(strategy=tag_a) if tag_a else None
-        filter_b = RetrievalFilter(strategy=tag_b) if tag_b else None
-
-        # Execute Pipeline A
-        resp_a = container.rag_chain_service.execute(
-            query=req.query,
-            retrieval_strategy=req.pipeline_a.retrieval_strategy or "vector",
-            top_k=req.pipeline_a.top_k or 5,
-            filters=filter_a,
-            semantic_weight=req.pipeline_a.semantic_weight or 0.5,
-            bm25_weight=req.pipeline_a.bm25_weight or 0.5,
-        )
-
-        # Execute Pipeline B
-        resp_b = container.rag_chain_service.execute(
-            query=req.query,
-            retrieval_strategy=req.pipeline_b.retrieval_strategy or "hybrid_rerank",
-            top_k=req.pipeline_b.top_k or 5,
-            filters=filter_b,
-            semantic_weight=req.pipeline_b.semantic_weight or 0.5,
-            bm25_weight=req.pipeline_b.bm25_weight or 0.5,
-        )
+        responses = []
+        for config in (req.pipeline_a, req.pipeline_b):
+            with custom_pipeline(req.document_id, config) as service:
+                responses.append(service.execute(
+                    query=req.query, retrieval_strategy=config.retrieval_strategy,
+                    top_k=config.top_k, semantic_weight=config.semantic_weight,
+                    bm25_weight=config.bm25_weight,
+                ))
+        for response in responses:
+            pipeline_tracer.save_answer(response.trace_id, response.model_dump(mode="json"))
+        resp_a, resp_b = responses
 
         latency_delta = round(resp_a.total_latency_ms - resp_b.total_latency_ms, 2)
         faster_pipeline = "Pipeline B" if latency_delta > 0 else "Pipeline A"
@@ -138,8 +121,10 @@ def execute_ab_test(req: ABTestRequest):
             "latency_delta_ms": abs(latency_delta),
             "faster_pipeline": faster_pipeline,
         }
+    except HTTPException:
+        raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"A/B test execution failed: {str(e)}")
+        raise HTTPException(status_code=500, detail={"message": f"A/B test execution failed: {str(e)}", "trace_id": getattr(e, "trace_id", None)})
 
 
 # Returns the step-by-step execution trace details for a given trace identifier.
@@ -153,6 +138,6 @@ def get_execution_trace(trace_id: str):
 
 # Returns the list of recent execution traces to populate the pipeline timeline history.
 @router.get("/traces", response_model=List[PipelineTrace])
-def list_execution_traces(limit: int = 20):
+def list_execution_traces(limit: int = Query(20, ge=1, le=100)):
     return pipeline_tracer.list_traces(limit=limit)
 
